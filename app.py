@@ -6,12 +6,12 @@ import plotly.express as px
 # 1. KONFIGURATION
 # Wichtig: Wir nutzen hier die stabilsten Ticker-Formate
 MY_ASSETS = {
-    "BTC-EUR": [90000.0, "Bitcoin"],
+    "BTC-EUR": [78000.0, "Bitcoin"],
     "ETH-EUR": [2500.0, "Ethereum"],
-    "XRP-EUR": [1.90, "Ripple"],
-    "AMZN": [180.0, "Amazon"],
-    "NOVO-B.CO": [700.0, "Novo Nordisk"],
-    "UNH": [540.0, "UnitedHealth"]
+    "XRP-EUR": [1.60, "Ripple"],
+    "AMZN": [190.0, "Amazon"],
+    "NOVO-B.CO": [390.0, "Novo Nordisk"],
+    "UNH": [300.0, "UnitedHealth"]
 }
 
 st.set_page_config(page_title="Family Finance", layout="wide")
