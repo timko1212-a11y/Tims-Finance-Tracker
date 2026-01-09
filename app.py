@@ -2,75 +2,76 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timedelta
 
-# 1. KONFIGURATION: Hier kannst du deine Assets verwalten
-# Format: "Ticker-Symbol": [Einstandspreis, "Name"]
+# 1. KONFIGURATION
+# Ich habe die Ticker angepasst: AMZN und UNH brauchen meist kein ".US" bei Yahoo
 MY_ASSETS = {
     "BTC-USD": [90000.0, "Bitcoin"],
     "ETH-USD": [2500.0, "Ethereum"],
     "XRP-USD": [1.90, "Ripple"],
     "AMZN": [180.0, "Amazon"],
-    "NOVO-B.CO": [700.0, "Novo Nordisk"], # Kopenhagen Ticker
+    "NOVO-B.CO": [700.0, "Novo Nordisk"],
     "UNH": [540.0, "UnitedHealth"]
 }
 
-st.set_page_config(page_title="Family Finance Tracker", layout="wide")
-
+st.set_page_config(page_title="Family Finance", layout="wide")
 st.title("🚀 Unser Familien-Finanz-Dashboard")
-st.write("Aktuelle Kurse und Portfolio-Performance im Überblick.")
 
-# 2. SIDEBAR: Einstellungen
 st.sidebar.header("Einstellungen")
-days_to_look_back = st.sidebar.slider("Zeitraum für Charts (Tage)", 7, 365, 30)
+days = st.sidebar.slider("Zeitraum (Tage)", 7, 365, 30)
 
-# 3. DATEN LADEN
-@st.cache_data(ttl=600) # Daten werden 10 Min gespeichert
-def get_data(tickers):
-    data = yf.download(tickers, period=f"{days_to_look_back}d", interval="1d")
-    return data['Close']
+# 2. DATEN LADEN (Optimiert für Zuverlässigkeit)
+@st.cache_data(ttl=600)
+def get_all_data(tickers, period_days):
+    combined_data = pd.DataFrame()
+    for t in tickers:
+        ticker_obj = yf.Ticker(t)
+        # Wir laden hier explizit die Historie für jedes Asset einzeln
+        hist = ticker_obj.history(period=f"{period_days}d")
+        if not hist.empty:
+            combined_data[t] = hist['Close']
+    return combined_data
 
 tickers = list(MY_ASSETS.keys())
-prices_df = get_data(tickers)
+prices_df = get_all_data(tickers, days)
 
-# 4. BERECHNUNGEN & ÜBERSICHT
-st.subheader("📊 Portfolio Übersicht")
+# 3. ÜBERSICHT ERSTELLEN
+if not prices_df.empty:
+    rows = []
+    for ticker, info in MY_ASSETS.items():
+        if ticker in prices_df.columns:
+            buy_price = info[0]
+            name = info[1]
+            # Holen des aktuellsten Preises (letzter Wert ohne 'nan')
+            valid_prices = prices_df[ticker].dropna()
+            if not valid_prices.empty:
+                current_price = valid_prices.iloc[-1]
+                perf_total = ((current_price - buy_price) / buy_price) * 100
+                
+                rows.append({
+                    "Asset": name,
+                    "Kaufpreis": f"{buy_price:,.2f}",
+                    "Aktuell": f"{current_price:,.2f}",
+                    "Performance (%)": round(perf_total, 2)
+                })
 
-rows = []
-for ticker, info in MY_ASSETS.items():
-    buy_price = info[0]
-    name = info[1]
+    df_display = pd.DataFrame(rows)
+
+    def color_perf(val):
+        return 'color: green' if val > 0 else 'color: red'
+
+    st.subheader("📊 Portfolio Übersicht")
+    st.table(df_display.style.applymap(color_perf, subset=['Performance (%)']))
+
+    # 4. CHART
+    st.subheader("📈 Relative Entwicklung")
+    # Normalisierung (Start bei 100%), um Äpfel mit Birnen vergleichen zu können
+    normalized_df = prices_df.copy()
+    for col in normalized_df.columns:
+        first_valid = normalized_df[col].dropna().iloc[0]
+        normalized_df[col] = (normalized_df[col] / first_valid) * 100
     
-    # Aktueller Kurs (letzter verfügbarer Wert)
-    current_price = prices_df[ticker].iloc[-1]
-    
-    # Performance seit Einstand
-    perf_total = ((current_price - buy_price) / buy_price) * 100
-    
-    rows.append({
-        "Asset": name,
-        "Ticker": ticker,
-        "Kaufpreis": f"{buy_price:,.2f}",
-        "Aktuell": f"{current_price:,.2f}",
-        "Performance (%)": round(perf_total, 2)
-    })
-
-df_display = pd.DataFrame(rows)
-
-# Farbliches Hervorheben der Performance
-def color_perf(val):
-    color = 'green' if val > 0 else 'red'
-    return f'color: {color}'
-
-st.table(df_display.style.applymap(color_perf, subset=['Performance (%)']))
-
-# 5. CHARTS (Performance-Entwicklung)
-st.subheader(f"📈 Entwicklung (letzte {days_to_look_back} Tage)")
-
-# Normalisierung auf 100% für besseren Vergleich
-normalized_df = prices_df / prices_df.iloc[0] * 100
-fig = px.line(normalized_df, labels={"value": "Index (Start=100)", "Date": "Datum"})
-fig.update_layout(legend_title_text='Assets', hovermode="x unified")
-st.plotly_chart(fig, use_container_width=True)
-
-st.info("Hinweis: Die Daten werden automatisch von Yahoo Finance aktualisiert.")
+    fig = px.line(normalized_df)
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.error("Keine Daten gefunden. Bitte Ticker-Symbole prüfen.")
