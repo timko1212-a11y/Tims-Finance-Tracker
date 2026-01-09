@@ -3,7 +3,8 @@ import yfinance as yf
 import pandas as pd
 import plotly.express as px
 
-# 1. KONFIGURATION
+# 1. KONFIGURATION (Deine Gesamtliste)
+# Hier trägst du einmalig alles ein, was du besitzt oder beobachtest.
 MY_ASSETS = {
     "BTC-USD": [90000.0, "Bitcoin"],
     "ETH-USD": [2500.0, "Ethereum"],
@@ -16,41 +17,51 @@ MY_ASSETS = {
 st.set_page_config(page_title="Family Finance", layout="wide")
 st.title("🚀 Unser Familien-Finanz-Dashboard")
 
-st.sidebar.header("Einstellungen")
-days = st.sidebar.slider("Zeitraum (Tage)", 7, 365, 30)
+# 2. SEITENLEISTE (Interaktive Steuerung)
+st.sidebar.header("Anzeige-Optionen")
 
-# 2. DATEN LADEN
+# NEU: Direkt in der App Assets ein/ausblenden
+selected_asset_names = st.sidebar.multiselect(
+    "Welche Assets anzeigen?",
+    options=[info[1] for info in MY_ASSETS.values()],
+    default=[info[1] for info in MY_ASSETS.values()]
+)
+
+days = st.sidebar.slider("Zeitraum für Chart (Tage)", 7, 365, 30)
+
+# Filtern der Ticker basierend auf der Auswahl
+selected_tickers = [t for t, info in MY_ASSETS.items() if info[1] in selected_asset_names]
+
+# 3. DATEN LADEN (Mit "Gedächtnis" für den letzten Kurs)
 @st.cache_data(ttl=600)
-def get_all_data(tickers, period_days):
+def get_robust_data(tickers, period_days):
     combined_data = pd.DataFrame()
     for t in tickers:
         try:
+            # Wir laden etwas mehr Daten, um sicher den letzten Kurs zu finden
             ticker_obj = yf.Ticker(t)
-            hist = ticker_obj.history(period=f"{period_days}d")
+            hist = ticker_obj.history(period=f"{period_days + 5}d") 
             if not hist.empty:
                 combined_data[t] = hist['Close']
         except:
-            continue # Falls ein Ticker Fehler macht, einfach ignorieren
+            continue
     return combined_data
 
-tickers = list(MY_ASSETS.keys())
-prices_df = get_all_data(tickers, days)
+prices_df = get_robust_data(selected_tickers, days)
 
-# 3. ÜBERSICHT
+# 4. ÜBERSICHT
 if not prices_df.empty:
     rows = []
-    available_tickers = []
-    
-    for ticker, info in MY_ASSETS.items():
+    for ticker in selected_tickers:
         if ticker in prices_df.columns:
-            buy_price = info[0]
-            name = info[1]
-            valid_prices = prices_df[ticker].dropna()
+            buy_price = MY_ASSETS[ticker][0]
+            name = MY_ASSETS[ticker][1]
             
-            if not valid_prices.empty:
-                current_price = valid_prices.iloc[-1]
+            # Suche den letzten echten Wert (nicht nan)
+            valid_series = prices_df[ticker].dropna()
+            if not valid_series.empty:
+                current_price = valid_series.iloc[-1]
                 perf_total = ((current_price - buy_price) / buy_price) * 100
-                available_tickers.append(ticker)
                 
                 rows.append({
                     "Asset": name,
@@ -61,24 +72,22 @@ if not prices_df.empty:
 
     if rows:
         df_display = pd.DataFrame(rows)
-        st.subheader("📊 Portfolio Übersicht")
+        st.subheader("📊 Aktuelle Portfolio Übersicht")
         st.table(df_display.style.applymap(lambda x: 'color: green' if x > 0 else 'color: red', subset=['Performance (%)']))
 
-        # 4. CHART (Nur für Assets mit Daten)
-        st.subheader("📈 Relative Entwicklung")
-        chart_df = prices_df[available_tickers].dropna(how='all')
+        # 5. CHART
+        st.subheader("📈 Relative Entwicklung (Index 100)")
+        chart_df = prices_df[selected_tickers].tail(days).copy()
         
-        # Normalisierung sicher durchführen
         normalized_df = pd.DataFrame()
         for col in chart_df.columns:
             series = chart_df[col].dropna()
             if not series.empty:
-                normalized_df[col] = (series / series.iloc[0]) * 100
+                normalized_df[MY_ASSETS[col][1]] = (series / series.iloc[0]) * 100
         
         if not normalized_df.empty:
             fig = px.line(normalized_df)
+            fig.update_layout(xaxis_title="Datum", yaxis_title="Wachstum in %", hovermode="x unified")
             st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("Es konnten keine aktuellen Kurse geladen werden. Bitte prüfe die Ticker-Symbole oder versuche es später erneut.")
 else:
-    st.error("Verbindung zu Finanzdaten fehlgeschlagen.")
+    st.info("Bitte wähle Assets in der Seitenleiste aus oder warte auf die Datenaktualisierung.")
