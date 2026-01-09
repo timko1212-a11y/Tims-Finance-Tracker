@@ -4,7 +4,6 @@ import pandas as pd
 import plotly.express as px
 
 # 1. KONFIGURATION
-# Ich habe die Ticker angepasst: AMZN und UNH brauchen meist kein ".US" bei Yahoo
 MY_ASSETS = {
     "BTC-USD": [90000.0, "Bitcoin"],
     "ETH-USD": [2500.0, "Ethereum"],
@@ -20,33 +19,38 @@ st.title("🚀 Unser Familien-Finanz-Dashboard")
 st.sidebar.header("Einstellungen")
 days = st.sidebar.slider("Zeitraum (Tage)", 7, 365, 30)
 
-# 2. DATEN LADEN (Optimiert für Zuverlässigkeit)
+# 2. DATEN LADEN
 @st.cache_data(ttl=600)
 def get_all_data(tickers, period_days):
     combined_data = pd.DataFrame()
     for t in tickers:
-        ticker_obj = yf.Ticker(t)
-        # Wir laden hier explizit die Historie für jedes Asset einzeln
-        hist = ticker_obj.history(period=f"{period_days}d")
-        if not hist.empty:
-            combined_data[t] = hist['Close']
+        try:
+            ticker_obj = yf.Ticker(t)
+            hist = ticker_obj.history(period=f"{period_days}d")
+            if not hist.empty:
+                combined_data[t] = hist['Close']
+        except:
+            continue # Falls ein Ticker Fehler macht, einfach ignorieren
     return combined_data
 
 tickers = list(MY_ASSETS.keys())
 prices_df = get_all_data(tickers, days)
 
-# 3. ÜBERSICHT ERSTELLEN
+# 3. ÜBERSICHT
 if not prices_df.empty:
     rows = []
+    available_tickers = []
+    
     for ticker, info in MY_ASSETS.items():
         if ticker in prices_df.columns:
             buy_price = info[0]
             name = info[1]
-            # Holen des aktuellsten Preises (letzter Wert ohne 'nan')
             valid_prices = prices_df[ticker].dropna()
+            
             if not valid_prices.empty:
                 current_price = valid_prices.iloc[-1]
                 perf_total = ((current_price - buy_price) / buy_price) * 100
+                available_tickers.append(ticker)
                 
                 rows.append({
                     "Asset": name,
@@ -55,23 +59,26 @@ if not prices_df.empty:
                     "Performance (%)": round(perf_total, 2)
                 })
 
-    df_display = pd.DataFrame(rows)
+    if rows:
+        df_display = pd.DataFrame(rows)
+        st.subheader("📊 Portfolio Übersicht")
+        st.table(df_display.style.applymap(lambda x: 'color: green' if x > 0 else 'color: red', subset=['Performance (%)']))
 
-    def color_perf(val):
-        return 'color: green' if val > 0 else 'color: red'
-
-    st.subheader("📊 Portfolio Übersicht")
-    st.table(df_display.style.applymap(color_perf, subset=['Performance (%)']))
-
-    # 4. CHART
-    st.subheader("📈 Relative Entwicklung")
-    # Normalisierung (Start bei 100%), um Äpfel mit Birnen vergleichen zu können
-    normalized_df = prices_df.copy()
-    for col in normalized_df.columns:
-        first_valid = normalized_df[col].dropna().iloc[0]
-        normalized_df[col] = (normalized_df[col] / first_valid) * 100
-    
-    fig = px.line(normalized_df)
-    st.plotly_chart(fig, use_container_width=True)
+        # 4. CHART (Nur für Assets mit Daten)
+        st.subheader("📈 Relative Entwicklung")
+        chart_df = prices_df[available_tickers].dropna(how='all')
+        
+        # Normalisierung sicher durchführen
+        normalized_df = pd.DataFrame()
+        for col in chart_df.columns:
+            series = chart_df[col].dropna()
+            if not series.empty:
+                normalized_df[col] = (series / series.iloc[0]) * 100
+        
+        if not normalized_df.empty:
+            fig = px.line(normalized_df)
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Es konnten keine aktuellen Kurse geladen werden. Bitte prüfe die Ticker-Symbole oder versuche es später erneut.")
 else:
-    st.error("Keine Daten gefunden. Bitte Ticker-Symbole prüfen.")
+    st.error("Verbindung zu Finanzdaten fehlgeschlagen.")
